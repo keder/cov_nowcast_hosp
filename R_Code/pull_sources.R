@@ -16,7 +16,7 @@ colnames(states) <- c('state', 'geography')
 
 # Pull Hospitalization Data -----------------------------------------------
 # Using new data.cdc.gov endpoint:
-hospitalizations_age <- read.csv("https://data.cdc.gov/resource/aemt-mg7g.csv?$limit=500000") %>% 
+hospitalizations_age <- read.csv("https://data.cdc.gov/resource/aemt-mg7g.csv") %>% 
   select(date = week_end_date, state = jurisdiction, weekly_actual_days_reporting_any_data, weekly_percent_days_reporting_any_data, 
          total_admissions_all_covid_confirmed, total_admissions_adult_covid_confirmed, total_admissions_pediatric_covid_confirmed, 
          avg_admissions_all_covid_confirmed, percent_adult_covid_admissions,
@@ -41,9 +41,9 @@ hospitalizations_age <- read.csv("https://data.cdc.gov/resource/aemt-mg7g.csv?$l
                                     T ~ 'UNMAPPED'))
 
 # Pull data from CDC API --------------------------------------------------
-scrape_list = list(NWSS_Wastewater_Metric = 'https://data.cdc.gov/resource/2ew6-ywp6.csv?$limit=5000000', # 
-                   NSSP_ED_Visit_Trajectory = 'https://data.cdc.gov/resource/rdmq-nq56.csv?$limit=5000000', # 
-                   NRVESS_Test_Positivity = 'https://data.cdc.gov/resource/gvsb-yw6g.csv?$limit=5000000')
+scrape_list = list(NWSS_Wastewater_Metric = 'https://data.cdc.gov/resource/2ew6-ywp6.csv', # 
+                   NSSP_ED_Visit_Trajectory = 'https://data.cdc.gov/resource/rdmq-nq56.csv', # 
+                   NRVESS_Test_Positivity = 'https://data.cdc.gov/resource/gvsb-yw6g.csv')
 
 full_scrape = lapply(scrape_list, function(x) try(pull_api(x)))
 
@@ -61,7 +61,7 @@ nvss_tp <- full_scrape$NRVESS_Test_Positivity %>%
   ungroup() %>%
   distinct()
 
-nssp <- full_scrape$NSSP_ED_Visit_Trajectory.csv  %>% 
+nssp <- full_scrape$NSSP_ED_Visit_Trajectory  %>% 
   filter(county == "All", 
          week_end <= "2024-05-01") %>% 
   mutate(date = as.Date(week_end), 
@@ -80,7 +80,7 @@ nssp <- nssp %>%
   mutate(percent_visits_covid = replace_na(percent_visits_covid, 0)) %>%
   select(ed_visit_date = date, state, geography, percent_visits_covid, mmwr_date)
 
-nwss_metric <-  full_scrape$NWSS_Wastewater_Metric.csv %>% 
+nwss_metric <-  full_scrape$NWSS_Wastewater_Metric %>% 
   filter(date_start <= '2024-05-01', 
          date_start >= '2022-08-01') %>%
   select(wwtp_jurisdiction:key_plot_id, population_served, date = date_end,
@@ -144,4 +144,4 @@ joined_df <- hospitalizations_age %>%
   left_join(nwss_wide, by = c('state', 'mmwr_date')) %>%
   filter(date <= "2024-05-01")
 
-write_csv('data/joined_df.csv')
+write_csv(joined_df, 'data/joined_df.csv')
