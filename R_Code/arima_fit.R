@@ -41,22 +41,41 @@ fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
 
   tryCatch(
     {
-      model <- auto.arima(ts_dat,
-        max.order = 30,
-        # Max values come from arima fits of TS alone
-        max.p = 7, max.q = 8,
-        max.P = 3, max.Q = 3,
-        max.d = 2, max.D = 2,
-        stepwise = FALSE, approximation = FALSE,
-        trace = FALSE, ic = "aic", seasonal.test = "ch",
-        xreg = training_xreg
-      )
+      if (is.null(training_xreg)) {
+        model <- auto.arima(ts_dat,
+          max.order = 30,
+          # Max values come from arima fits of TS alone
+          max.p = 7, max.q = 8,
+          max.P = 3, max.Q = 3,
+          max.d = 2, max.D = 2,
+          stepwise = FALSE, approximation = FALSE,
+          trace = FALSE, ic = "aic", seasonal.test = "ch"
+        )
+      } else {
+        model <- auto.arima(ts_dat,
+          max.order = 30,
+          # Max values come from arima fits of TS alone
+          max.p = 7, max.q = 8,
+          max.P = 3, max.Q = 3,
+          max.d = 2, max.D = 2,
+          stepwise = FALSE, approximation = FALSE,
+          trace = FALSE, ic = "aic", seasonal.test = "ch",
+          xreg = training_xreg
+        )
+      }
 
       train_data$fitted <- model$fitted
-      n <- n_distinct(data %>% filter(date >= cut_date) %>% pull(date))
-      forecasted <- as_tibble(forecast(model, h = n, xreg = test_xreg)) %>%
-        bind_cols(data %>% filter(date >= cut_date)) %>%
-        select(date, hosp, everything())
+      if (is.null(training_xreg)) {
+        n <- n_distinct(data %>% filter(date >= cut_date) %>% pull(date))
+        forecasted <- as_tibble(forecast(model, h = n)) %>%
+          bind_cols(data %>% filter(date >= cut_date)) %>%
+          select(date, hosp, everything())
+      } else {
+        n <- n_distinct(data %>% filter(date >= cut_date) %>% pull(date))
+        forecasted <- as_tibble(forecast(model, h = n, xreg = test_xreg)) %>%
+          bind_cols(data %>% filter(date >= cut_date)) %>%
+          select(date, hosp, everything())
+      }
 
       train_data <- train_data %>%
         bind_rows(forecasted) %>%
@@ -70,7 +89,7 @@ fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
       return(train_data)
     },
     error = function(err) {
-      print(paste0("ARIMA for state ", state, " on date ", cut_date, " failed with error: ", err$message))
+      print(paste0("ARIMA for state ", state, " on date ", cut_date, " with xreg=", paste(names(xreg), collapse = ", "), ", failed with error: ", err$message))
       return(tibble())
     }
   )
