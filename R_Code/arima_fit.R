@@ -78,6 +78,7 @@ fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
 
 
 # Set Prediction Horizons -------------------------------------------------
+joined_df <- read.csv("data/joined_df.csv", check.names = FALSE)
 full_data <- joined_df
 full_data$date <- as.Date(full_data$date)
 max_date <- max(full_data$date)
