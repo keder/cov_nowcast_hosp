@@ -25,10 +25,9 @@ fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
   train_data <- data %>% filter(date < cut_date)
   ts_dat <- ts(train_data$hosp_transformed, frequency = freq)
 
-  if (is.null(xreg)) {
-    training_xreg <- NULL
-    test_xreg <- NULL
-  } else {
+  training_xreg <- NULL
+  test_xreg <- NULL
+  if (!is.null(xreg)) {
     training_xreg <- xreg %>%
       filter(date < cut_date) %>%
       select(!date) %>%
@@ -71,7 +70,7 @@ fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
       return(train_data)
     },
     error = function(err) {
-      print(err)
+      print(paste0("ARIMA for state ", state, " on date ", cut_date, " failed with error: ", err$message))
       return(tibble())
     }
   )
