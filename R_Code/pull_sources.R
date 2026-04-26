@@ -1,147 +1,191 @@
 # Load Packages -----------------------------------------------------------
-pacman::p_load(tidyverse, pdftools, jsonlite, httr, lubridate, tabulapdf, MMWRweek)
+pacman::p_load(tidyverse, httr, lubridate, MMWRweek)
 
-# Function ---------------------------------------------------------------
-pull_api = function(endpoint, limit = "5000000") {
-  return(read_csv(paste0(endpoint, "?$limit=", limit)))
+# Constants ---------------------------------------------------------------
+START_DATE <- as.Date("2022-10-01")
+END_DATE   <- as.Date("2024-05-01")
+
+# Helpers -----------------------------------------------------------------
+pull_api <- function(url, limit = 5000000) {
+  limit <- as.character(as.integer(limit))
+  read_csv(paste0(url, "?$limit=", limit), show_col_types = FALSE)
 }
 
-# Create State/Abb Crosswalk DF -------------------------------------------
+add_mmwr <- function(df, date_col = "date") {
+  df %>%
+    mutate(
+      date = as.Date(.data[[date_col]]),
+      mmwr = MMWRweek::MMWRweek(date),
+      mmwr_date = sprintf("%d-%02d", mmwr$MMWRyear, mmwr$MMWRweek)
+    ) %>%
+    select(-mmwr)
+}
 
-states <- state.abb %>% bind_cols(state.name) %>%
-  bind_rows(list(`...1` = 'DC', `...2` = 'District of Columbia')) %>%
-  bind_rows(list(`...1` = 'USA', `...2` = 'United States'))
-colnames(states) <- c('state', 'geography')
+add_hhs_region <- function(df) {
+  df %>%
+    mutate(
+      level = case_when(
+        grepl("CT|ME|MA|NH|RI|VT", state) ~ "Region 1",
+        grepl("NJ|NY|PR|VI", state) ~ "Region 2",
+        grepl("DE|DC|MD|PA|VA|WV", state) ~ "Region 3",
+        grepl("AL|FL|GA|KY|MS|NC|SC|TN", state) ~ "Region 4",
+        grepl("IL|IN|MI|MN|OH|WI", state) ~ "Region 5",
+        grepl("AR|LA|NM|OK|TX", state) ~ "Region 6",
+        grepl("IA|KS|MO|NE", state) ~ "Region 7",
+        grepl("CO|MT|ND|SD|UT|WY", state) ~ "Region 8",
+        grepl("AZ|CA|HI|NV|AS|GU|MP", state) ~ "Region 9",
+        grepl("AK|ID|OR|WA", state) ~ "Region 10",
+        state == "USA" ~ "National",
+        TRUE ~ NA_character_
+      )
+    )
+}
 
+# State crosswalk ---------------------------------------------------------
+states <- tibble(
+  state = c(state.abb, "DC", "USA"),
+  geography = c(state.name, "District of Columbia", "United States")
+)
 
-# Pull Hospitalization Data -----------------------------------------------
-# Using new data.cdc.gov endpoint:
-hospitalizations_age <- read.csv("https://data.cdc.gov/resource/aemt-mg7g.csv") %>% 
-  select(date = week_end_date, state = jurisdiction, weekly_actual_days_reporting_any_data, weekly_percent_days_reporting_any_data, 
-         total_admissions_all_covid_confirmed, total_admissions_adult_covid_confirmed, total_admissions_pediatric_covid_confirmed, 
-         avg_admissions_all_covid_confirmed, percent_adult_covid_admissions,
-         num_hospitals_admissions_all_covid_confirmed) %>%
-  mutate(date = as.Date(date), 
-         mmwr = MMWRweek::MMWRweek(date), 
-         mmwr_date = paste0(mmwr$MMWRyear, '-', if_else(nchar(mmwr$MMWRweek) == 1, 
-                                                        paste0("0", mmwr$MMWRweek), 
-                                                        as.character(mmwr$MMWRweek))),
-           #add HHS region to hospitalizations to map NVSS TP
-           level = case_when(grepl('CT|ME|MA|NH|RI|VT', state) ~ 'Region 1', 
-                                    grepl('NJ|NY|PR|VI', state) ~ 'Region 2', 
-                                    grepl('DE|DC|MD|PA|VA|WV', state) ~ 'Region 3',
-                                    grepl('AL|FL|GA|KY|MS|NC|SC|TN', state) ~ 'Region 4',
-                                    grepl('IL|IN|MI|MN|OH|WI', state) ~ 'Region 5', 
-                                    grepl('AR|LA|NM|OK|TX', state) ~ 'Region 6', 
-                                    grepl('IA|KS|MO|NE', state) ~ 'Region 7', 
-                                    grepl('CO|MT|ND|SD|UT|WY', state) ~ 'Region 8', 
-                                    grepl('AZ|CA|HI|NV|AS|GU|MP', state) ~ 'Region 9', 
-                                    grepl('AK|ID|OR|WA', state) ~ 'Region 10', 
-                                    state == 'USA' ~ 'National',
-                                    T ~ 'UNMAPPED'))
+state_to_abbr <- setNames(states$state, states$geography)
 
-# Pull data from CDC API --------------------------------------------------
-scrape_list = list(NWSS_Wastewater_Metric = 'https://data.cdc.gov/resource/2ew6-ywp6.csv', # 
-                   NSSP_ED_Visit_Trajectory = 'https://data.cdc.gov/resource/rdmq-nq56.csv', # 
-                   NRVESS_Test_Positivity = 'https://data.cdc.gov/resource/gvsb-yw6g.csv')
+# Hospitalizations --------------------------------------------------------
+hospitalizations <- pull_api("https://data.cdc.gov/resource/aemt-mg7g.csv") %>%
+  transmute(
+    date = as.Date(week_end_date),
+    state = jurisdiction,
+    total_admissions_all_covid_confirmed = total_admissions_all_covid_confirmed
+  ) %>%
+  add_mmwr("date") %>%
+  add_hhs_region() %>%
+  filter(date <= END_DATE)
 
-full_scrape = lapply(scrape_list, function(x) try(pull_api(x)))
-
-nvss_tp <- full_scrape$NRVESS_Test_Positivity %>% 
-  mutate(date = as.Date(mmwrweek_end), 
-         mmwr = MMWRweek::MMWRweek(date), 
-         mmwr_date = paste0(mmwr$MMWRyear, '-', 
-                            if_else(nchar(mmwr$MMWRweek) == 1, paste0("0", 
-                                                                      mmwr$MMWRweek),  as.character(mmwr$MMWRweek)))) %>%
-  select(date, level, percent_pos, number_tested, mmwr_date, posted) %>%
-  mutate(count_pos = percent_pos * number_tested) %>%
+# NVSS --------------------------------------------------------------------
+nvss <- pull_api("https://data.cdc.gov/resource/gvsb-yw6g.csv") %>%
+  mutate(date = as.Date(mmwrweek_end)) %>%
+  add_mmwr("date") %>%
+  transmute(
+    date,
+    level,
+    mmwr_date,
+    percent_pos,
+    count_pos = percent_pos * number_tested,
+    posted
+  ) %>%
   group_by(date, level) %>%
-  filter(posted== max(posted), 
-         date <= "2024-05-01") %>%
+  filter(posted == max(posted), date <= END_DATE) %>%
   ungroup() %>%
   distinct()
 
-nssp <- full_scrape$NSSP_ED_Visit_Trajectory  %>% 
-  filter(county == "All", 
-         week_end <= "2024-05-01") %>% 
-  mutate(date = as.Date(week_end), 
-         mmwr = MMWRweek::MMWRweek(date), 
-         mmwr_date = paste0(mmwr$MMWRyear, '-', 
-                            if_else(nchar(mmwr$MMWRweek) == 1, paste0("0", 
-                                                                      mmwr$MMWRweek),  as.character(mmwr$MMWRweek)))) 
+# NSSP --------------------------------------------------------------------
+nssp <- pull_api("https://data.cdc.gov/resource/rdmq-nq56.csv") %>%
+  filter(county == "All", week_end <= END_DATE) %>%
+  mutate(date = as.Date(week_end)) %>%
+  add_mmwr("date") %>%
+  transmute(
+    state = state_to_abbr[geography],
+    date,
+    mmwr_date,
+    percent_visits_covid = replace_na(percent_visits_covid, 0)
+  )
 
-# Ensure full set of data for each state, date possible from the dataset
-dates <- unique(nssp  %>% select(date, mmwr_date) %>% distinct() %>% 
-                  filter(date <= '2024-05-01'))
-nssp <- nssp %>% 
-  full_join(states %>% 
-              cross_join(dates)) %>%
-  # Replace NA values with a 0
-  mutate(percent_visits_covid = replace_na(percent_visits_covid, 0)) %>%
-  select(ed_visit_date = date, state, geography, percent_visits_covid, mmwr_date)
-
-nwss_metric <-  full_scrape$NWSS_Wastewater_Metric %>% 
-  filter(date_start <= '2024-05-01', 
-         date_start >= '2022-08-01') %>%
-  select(wwtp_jurisdiction:key_plot_id, population_served, date = date_end,
-         detect_prop_15d) %>%
+# ----------------------------- NWSS METRIC -----------------------------
+nwss_metric <- pull_api("https://data.cdc.gov/resource/2ew6-ywp6.csv") %>%
+  filter(
+    date_start <= as.Date(END_DATE),
+    date_start >= as.Date("2022-08-01")
+  ) %>%
+  select(
+    wwtp_jurisdiction:key_plot_id,
+    population_served,
+    date = date_end,
+    detect_prop_15d
+  ) %>%
   distinct() %>%
-  mutate(date = as.Date(date), 
-         mmwr = MMWRweek::MMWRweek(date), 
-         mmwr_date = paste0(mmwr$MMWRyear, '-', 
-                            if_else(nchar(mmwr$MMWRweek) == 1, paste0("0", 
-                             mmwr$MMWRweek),  as.character(mmwr$MMWRweek))))  %>%
+  mutate(
+    date = as.Date(date),
+    mmwr = MMWRweek::MMWRweek(date),
+    mmwr_date = sprintf("%d-%02d", mmwr$MMWRyear, mmwr$MMWRweek),
+    state = state.abb[match(reporting_jurisdiction, state.name)]
+  ) %>%
   filter(!is.nan(detect_prop_15d)) %>%
-  group_by(reporting_jurisdiction, key_plot_id, sample_location, mmwr_date) %>%
-  summarise(population_served = mean(population_served, na.rm = T),
-            detect_prop_15d = mean(na.omit(detect_prop_15d), na.rm = T)) %>%
-  group_by(reporting_jurisdiction, sample_location, key_plot_id) %>%
-  arrange(reporting_jurisdiction, key_plot_id, mmwr_date) %>%
-  tidyr::fill(., detect_prop_15d)
+  group_by(state, key_plot_id, sample_location, mmwr_date) %>%
+  summarise(
+    population_served = mean(population_served, na.rm = TRUE),
+    detect_prop_15d = mean(na.omit(detect_prop_15d), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(state, sample_location, key_plot_id) %>%
+  arrange(mmwr_date, .by_group = TRUE) %>%
+  tidyr::fill(detect_prop_15d, .direction = "down")
 
+# ----------------------------- NWSS FILTER -----------------------------
 nwss <- nwss_metric %>%
-  filter(sample_location == 'Treatment plant')  %>%
-  mutate(location = gsub("90_|89_", "",
-                         str_split_i(key_plot_id, "Treatment plant_", 2)))
-
-nwss_dates <- cross_join(states, 
-               cross_join(nwss  %>% ungroup() %>% select(location) %>% distinct(), 
-                        nwss  %>% ungroup() %>% select(mmwr_date) %>% distinct()))
-
-nwss <- nwss %>%
+  filter(sample_location == "Treatment plant") %>%
+  mutate(
+    location = gsub("90_|89_", "", str_split_i(key_plot_id, "Treatment plant_", 2))
+  ) %>%
   ungroup() %>%
-  select(state = reporting_jurisdiction, key_plot_id, mmwr_date, location, 
-         population_served, detect_prop_15d) # pcr_conc_lin, normalization,
+  transmute(
+    state,
+    key_plot_id,
+    mmwr_date,
+    location,
+    population_served,
+    detect_prop_15d
+  )
 
+# ----------------------------- NWSS GRID COMPONENTS --------------------
+nwss_dates_state <- nwss %>% distinct(state)
+nwss_dates_location <- nwss %>% distinct(location)
+nwss_dates_time <- nwss %>% distinct(mmwr_date)
+
+# ----------------------------- NWSS AGGREGATION ------------------------
 nwss_metric_wide <- nwss %>%
-  select(state, key_plot_id, mmwr_date, location, population_served, 
-         detect_prop_15d) %>%
   filter(!is.nan(detect_prop_15d), !is.na(population_served)) %>%
   group_by(state, mmwr_date, location) %>%
-  summarise(total_pop = sum(population_served, na.rm = T), 
-            avg_detect_prop_weighted = weighted.mean(detect_prop_15d, population_served, 
-                                                     na.rm = T), 
-            avg_detect_prop_unweighted = mean(detect_prop_15d,  na.rm = T)) %>%
-  select(!total_pop)
+  summarise(
+    total_pop = sum(population_served, na.rm = TRUE),
+    avg_detect_prop_weighted = weighted.mean(detect_prop_15d, population_served, na.rm = TRUE),
+    avg_detect_prop_unweighted = mean(detect_prop_15d, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  select(-total_pop)
 
+# ----------------------------- NWSS WIDE -------------------------------
 nwss_wide <- nwss_metric_wide %>%
-  ungroup() %>%
-  rename(geography = state) %>%
-  full_join(nwss_dates) %>%
+  full_join(
+    tidyr::crossing(
+      state = nwss_dates_state$state,
+      location = nwss_dates_location$location,
+      mmwr_date = nwss_dates_time$mmwr_date
+    ),
+    by = c("state", "location", "mmwr_date")
+  ) %>%
   group_by(state, location) %>%
-  fill(avg_detect_prop_weighted:avg_detect_prop_unweighted, .direction = "down") %>%
+  arrange(mmwr_date, .by_group = TRUE) %>%
+  tidyr::fill(
+    avg_detect_prop_weighted,
+    avg_detect_prop_unweighted,
+    .direction = "down"
+  ) %>%
   ungroup() %>%
-  select(!geography) %>%
   filter(!is.na(state)) %>%
-  mutate(across(where(is.numeric), ~ replace_na(.x, 0)/100)) |>
-  pivot_wider(names_from = location, 
-              values_from = avg_detect_prop_weighted:avg_detect_prop_unweighted)
+  mutate(across(where(is.numeric), ~ replace_na(.x, 0) / 100)) %>%
+  pivot_wider(
+    names_from = location,
+    values_from = c(avg_detect_prop_weighted, avg_detect_prop_unweighted)
+  )
 
-# Combine Data ------------------------------------------------------------
-joined_df <- hospitalizations_age %>%
-  left_join(nvss_tp, by = c('level', 'mmwr_date', 'date')) %>%
-  left_join(nssp, by = c('state', 'mmwr_date')) %>%
-  left_join(nwss_wide, by = c('state', 'mmwr_date')) %>%
-  filter(date <= "2024-05-01")
+# FINAL JOIN --------------------------------------------------------------
+joined_df <- hospitalizations %>%
+  left_join(nvss, by = c("level", "date", "mmwr_date")) %>%
+  left_join(nssp, by = c("state", "date", "mmwr_date")) %>%
+  left_join(nwss_wide, by = c("state", "mmwr_date")) %>%
+  filter(
+    date <= as.Date(END_DATE),
+    date >= as.Date(START_DATE)
+  ) %>%
+  mutate(across(where(is.numeric), ~ replace_na(.x, 0)))
 
-write_csv(joined_df, 'data/joined_df.csv')
+write_csv(joined_df, "data/joined_df.csv")
