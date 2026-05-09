@@ -31,6 +31,17 @@ add_perturbation <- function(x) {
   }
 }
 
+add_perturbation <- function(x) {
+  len <- length(x)
+  scale_factor <- 1 / 1000
+  if (sum(x, na.rm = T) == 0) {
+    rand_vector <- runif(len)
+    return((log(rand_vector) + 1) * scale_factor)
+  } else {
+    return(x)
+  }
+}
+
 # Fit Arima for each state/multivariate model
 fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
   train_data <- data %>% filter(date < cut_date)
