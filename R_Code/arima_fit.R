@@ -20,6 +20,17 @@ extract_aic <- function(p, d, q, P, D, Q) {
   )$aic
 }
 
+add_perturbation <- function(x) {
+  len <- length(x)
+  scale_factor <- 1 / 1000
+  if (sum(x, na.rm = T) == 0) {
+    rand_vector <- runif(len)
+    return((log(rand_vector) + 1) * scale_factor)
+  } else {
+    return(x)
+  }
+}
+
 # Fit Arima for each state/multivariate model
 fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
   train_data <- data %>% filter(date < cut_date)
@@ -147,6 +158,10 @@ for (state_nm in full_data$state) {
     ) %>%
     filter(date >= "2022-10-01") %>%
     drop_na()
+  mutate(across(
+    sludge_pct_transformed,
+    ~ add_perturbation(.x)
+  ))
   for (predict_cut in prediction_horizons) {
     # Run models for each prediction horizon and set of covariates
     print(paste0(state_nm, predict_cut))

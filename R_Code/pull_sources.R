@@ -3,7 +3,7 @@ pacman::p_load(tidyverse, httr, lubridate, MMWRweek)
 
 # Constants ---------------------------------------------------------------
 START_DATE <- as.Date("2022-10-01")
-END_DATE   <- as.Date("2024-05-01")
+END_DATE <- as.Date("2024-05-01")
 
 # Helpers -----------------------------------------------------------------
 pull_api <- function(url, limit = 5000000) {
@@ -39,6 +39,23 @@ add_hhs_region <- function(df) {
         TRUE ~ NA_character_
       )
     )
+}
+
+interpolate_or_zero <- function(x, min_points = 2) {
+  non_na <- !is.na(x)
+
+  if (sum(non_na) >= min_points) {
+    return(
+      approx(
+        x = which(non_na),
+        y = x[non_na],
+        xout = seq_along(x),
+        rule = 2
+      )$y
+    )
+  }
+
+  replace(x, non_na, 0)
 }
 
 # State crosswalk ---------------------------------------------------------
@@ -91,10 +108,6 @@ nssp <- pull_api("https://data.cdc.gov/resource/rdmq-nq56.csv") %>%
 
 # ----------------------------- NWSS METRIC -----------------------------
 nwss_metric <- pull_api("https://data.cdc.gov/resource/2ew6-ywp6.csv") %>%
-  filter(
-    date_start <= as.Date(END_DATE),
-    date_start >= as.Date("2022-08-01")
-  ) %>%
   select(
     wwtp_jurisdiction:key_plot_id,
     population_served,
@@ -114,17 +127,19 @@ nwss_metric <- pull_api("https://data.cdc.gov/resource/2ew6-ywp6.csv") %>%
     population_served = mean(population_served, na.rm = TRUE),
     detect_prop_15d = mean(na.omit(detect_prop_15d), na.rm = TRUE),
     .groups = "drop"
-  ) %>%
+  ) %>% # Average data across weekdays for each location
   group_by(state, sample_location, key_plot_id) %>%
-  arrange(mmwr_date, .by_group = TRUE) %>%
-  tidyr::fill(detect_prop_15d, .direction = "down")
+  arrange(mmwr_date, .by_group = TRUE) %>% # Sort by mmwr_date
+  mutate(
+    detect_prop_15d = interpolate_or_zero(detect_prop_15d)
+  )
 
 # ----------------------------- NWSS FILTER -----------------------------
 nwss <- nwss_metric %>%
-  filter(sample_location == "Treatment plant") %>%
+  filter(sample_location == "Treatment plant") %>% # Leave only last point of water treatment
   mutate(
     location = gsub("90_|89_", "", str_split_i(key_plot_id, "Treatment plant_", 2))
-  ) %>%
+  ) %>% # Extract only type of sampling (sample location as in where in the facility), e.g. raw wastewater, post grit removal, primary sludge
   ungroup() %>%
   transmute(
     state,
@@ -146,8 +161,8 @@ nwss_metric_wide <- nwss %>%
   group_by(state, mmwr_date, location) %>%
   summarise(
     total_pop = sum(population_served, na.rm = TRUE),
-    avg_detect_prop_weighted = weighted.mean(detect_prop_15d, population_served, na.rm = TRUE),
-    avg_detect_prop_unweighted = mean(detect_prop_15d, na.rm = TRUE),
+    avg_detect_prop_weighted = weighted.mean(detect_prop_15d, population_served, na.rm = TRUE), # Percentage detected weighted by population
+    avg_detect_prop_unweighted = mean(detect_prop_15d, na.rm = TRUE), # Percentage detected unweighted average
     .groups = "drop"
   ) %>%
   select(-total_pop)
@@ -159,16 +174,20 @@ nwss_wide <- nwss_metric_wide %>%
       state = nwss_dates_state$state,
       location = nwss_dates_location$location,
       mmwr_date = nwss_dates_time$mmwr_date
-    ),
+    ), # Project data on fully covering grid
     by = c("state", "location", "mmwr_date")
   ) %>%
   group_by(state, location) %>%
   arrange(mmwr_date, .by_group = TRUE) %>%
-  tidyr::fill(
-    avg_detect_prop_weighted,
-    avg_detect_prop_unweighted,
-    .direction = "down"
-  ) %>%
+  mutate(
+    across(
+      c(
+        avg_detect_prop_weighted,
+        avg_detect_prop_unweighted
+      ),
+      interpolate_or_zero
+    )
+  ) %>% # Fill data missing when we projected existing data on all combinations of "state", "location", "mmwr_date"
   ungroup() %>%
   filter(!is.na(state)) %>%
   mutate(across(where(is.numeric), ~ replace_na(.x, 0) / 100)) %>%
@@ -188,4 +207,4 @@ joined_df <- hospitalizations %>%
   ) %>%
   mutate(across(where(is.numeric), ~ replace_na(.x, 0)))
 
-write_csv(joined_df, "data/joined_df.csv")
+write_csv(joined_df, "data/joined_df.csv", na = "NA")

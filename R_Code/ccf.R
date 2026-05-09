@@ -74,17 +74,17 @@ get_ccf <- function(df, state_nm) {
                      ed$total_admissions_all_covid_confirmed,
                      lag.max = 5, na.action = na.pass, plot = FALSE),
 
-    "Weighted WW Post-Grit Removal % Detect" =
+    "Wtd WW Post-Grit Removal %" =
       ccf(nwss$`avg_detect_prop_weighted_post grit removal`,
           nwss$total_admissions_all_covid_confirmed,
           lag.max = 5, na.action = na.pass, plot = FALSE),
 
-    "Weighted WW Raw % Detect" =
+    "Wtd WW Raw %" =
       ccf(nwss$`avg_detect_prop_unweighted_raw wastewater`,
           nwss$total_admissions_all_covid_confirmed,
           lag.max = 5, na.action = na.pass, plot = FALSE),
 
-    "Weighted WW Primary Sludge % Detect" =
+    "Wtd WW Primary Sludge %" =
       ccf(nwss$`avg_detect_prop_weighted_primary sludge`,
           nwss$total_admissions_all_covid_confirmed,
           lag.max = 5, na.action = na.pass, plot = FALSE)
@@ -128,15 +128,22 @@ write_csv(ccf_df, "results/ccf_heatmap_input.csv")
 
 p <- ggplot(ccf_df, aes(x = state, y = type, fill = acf)) +
   geom_tile() +
-  geom_text(aes(label = if_else(acf == 0, "-", as.character(round(acf, 2)))),
-            size = 2.7) +
+  geom_text(
+    aes(label = if_else(acf == 0, "-", as.character(round(acf, 2)))),
+    size = 4.375,
+    angle = 90,
+    color = "black"
+  ) +
   scale_y_discrete(labels = function(x) str_wrap(x, width = 18)) +
   scale_fill_distiller("Correlation", palette = "RdBu", limits = c(-1, 1)) +
   theme_minimal() +
   theme(
     axis.title.y = element_blank(),
     axis.title.x = element_blank(),
-    axis.text.x = element_text(angle = 0.45)
+    axis.text.x = element_text(size = 13.75, angle = 90, hjust = 1),
+    axis.text.y = element_text(size = 12),
+    legend.text = element_text(size = 13.75),
+    legend.title = element_text(size = 13.75)
   )
 
 ggsave("results/CCF_Heatmap.pdf",
