@@ -53,11 +53,23 @@ fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
     training_xreg <- xreg %>%
       filter(date < cut_date) %>%
       select(!date) %>%
+      mutate(
+        across(
+          everything(),
+          ~ add_perturbation(.x)
+        )
+      ) %>%
       as.matrix()
 
     test_xreg <- xreg %>%
       filter(date >= cut_date) %>%
       select(!date) %>%
+      mutate(
+        across(
+          everything(),
+          ~ add_perturbation(.x)
+        )
+      ) %>%
       as.matrix()
   }
 
