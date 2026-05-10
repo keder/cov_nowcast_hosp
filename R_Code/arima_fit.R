@@ -4,6 +4,8 @@ pacman::p_load(
   uroot
 )
 
+set.seed(42)
+
 ## Faster than auto.arima way to get optimal model, first CSS then ML
 extract_loglik <- function(p, d, q, P, D, Q) {
   # print(paste("Order is", p, ",",d, ",", q, " | Season is", P, ",",D, ",", Q))
@@ -37,6 +39,9 @@ add_perturbation <- function(x) {
   if (sum(x, na.rm = T) == 0) {
     rand_vector <- runif(len)
     return((log(rand_vector) + 1) * scale_factor)
+  } else if ((var(x, na.rm = T) == 0)) {
+    rand_vector <- runif(len)
+    return(x - (log(rand_vector) + 1) * scale_factor)
   } else {
     return(x)
   }
@@ -170,7 +175,7 @@ for (state_nm in full_data$state) {
     filter(date >= "2022-10-01") %>%
     drop_na() %>%
     mutate(across(
-      sludge_pct_transformed,
+      count_transformed:sludge_pct_transformed,
       ~ add_perturbation(.x)
     ))
   for (predict_cut in prediction_horizons) {
