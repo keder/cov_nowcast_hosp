@@ -28,17 +28,6 @@ add_perturbation <- function(x) {
   if (sum(x, na.rm = T) == 0) {
     rand_vector <- runif(len)
     return((log(rand_vector) + 1) * scale_factor)
-  } else {
-    return(x)
-  }
-}
-
-add_perturbation <- function(x) {
-  len <- length(x)
-  scale_factor <- 1 / 1000
-  if (sum(x, na.rm = T) == 0) {
-    rand_vector <- runif(len)
-    return((log(rand_vector) + 1) * scale_factor)
   } else if ((var(x, na.rm = T) == 0)) {
     rand_vector <- runif(len)
     return(x - (log(rand_vector) + 1) * scale_factor)
