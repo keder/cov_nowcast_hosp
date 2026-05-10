@@ -43,6 +43,12 @@ fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
 
   training_xreg <- NULL
   test_xreg <- NULL
+  model_text <- paste0("ARIMA ", cut_date, " ", state)
+  if (!is.null(xreg)) {
+    print(paste0(model_text, " xreg: ", paste(names(xreg)[-1], collapse = ",")))
+  } else {
+    print(paste0(model_text, " no xreg"))
+  }
   if (!is.null(xreg)) {
     training_xreg <- xreg %>%
       filter(date < cut_date) %>%
@@ -128,7 +134,7 @@ freq <- 26
 df_list <- tibble()
 
 # For each state
-for (state_nm in full_data$state) {
+for (state_nm in c(state.abb, "DC")) {
   print(state_nm)
   data <- full_data %>%
     filter(
@@ -169,7 +175,6 @@ for (state_nm in full_data$state) {
     ))
   for (predict_cut in prediction_horizons) {
     # Run models for each prediction horizon and set of covariates
-    print(paste0(state_nm, predict_cut))
     no_reg <- fit_arima_regressors(predict_cut, data, state_nm, freq,
       xreg = NULL
     ) %>%
@@ -224,7 +229,7 @@ for (state_nm in full_data$state) {
 
 # Write out results
 dir.create("results/Multivariate", recursive = TRUE)
-write_rds(df_list, paste0("results/Multivariate/arimaX_", freq, "final.rds"))
+write_rds(df_list, paste0("results/Multivariate/arima_", freq, "final.rds"))
 
 # Plot
 for (predict_cut in prediction_horizons) {
