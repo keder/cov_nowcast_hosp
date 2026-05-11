@@ -231,7 +231,8 @@ for (state_nm in c(state.abb, "DC")) {
         )
     ) %>%
       mutate(model_type = "All Regressors")
-    df_list <- bind_rows(no_reg, ed_reg) %>%
+    df_list <- bind_rows(df_list, no_reg) %>%
+      bind_rows(ed_reg) %>%
       bind_rows(ed_count_reg) %>%
       bind_rows(ww_reg) %>%
       bind_rows(ww_all_reg) %>%
@@ -240,7 +241,7 @@ for (state_nm in c(state.abb, "DC")) {
 }
 
 # Write out results
-dir.create("results/Multivariate", recursive = TRUE)
+dir.create("results/Multivariate", recursive = TRUE, showWarnings = FALSE)
 write_rds(df_list, paste0("results/Multivariate/arima_", freq, "final.rds"))
 
 # Plot
