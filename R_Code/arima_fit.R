@@ -53,24 +53,26 @@ fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
     training_xreg <- xreg %>%
       filter(date < cut_date) %>%
       select(!date) %>%
-      mutate(
-        across(
-          everything(),
-          ~ add_perturbation(.x)
-        )
-      ) %>%
       as.matrix()
 
     test_xreg <- xreg %>%
       filter(date >= cut_date) %>%
       select(!date) %>%
-      mutate(
-        across(
-          everything(),
-          ~ add_perturbation(.x)
-        )
-      ) %>%
       as.matrix()
+  }
+
+  zero_xregs <- sapply(training_xreg, function(x) sum(x, na.rm = TRUE) == 0)
+  if (any(zero_xregs)) {
+    train_data <- train_data %>%
+      bind_rows(data %>%
+        filter(date >= cut_date) %>%
+        mutate(
+          state = state, cut_date = cut_date,
+          freq = freq,
+          fitted = NA,
+          `Point Forecast` = NA
+        )) %>%
+        select(state, cut_date, date, hosp, everything())
   }
 
   tryCatch(
