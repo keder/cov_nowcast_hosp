@@ -214,12 +214,9 @@ for(predict_cut in prediction_horizons){
 df_list <- tibble()
 
 full_data <- read_csv('data/joined_df.csv')
-ccf = read_csv('results/ccf.csv')
 # Run model for each state
 for(state_nm in c(state.abb, "DC")){
   print(state_nm)
-  ccf_state = ccf %>%
-    filter(state == state_nm)
   data <- full_data %>%
     filter(state == state_nm,
            date <= '2024-05-01') %>%
@@ -232,35 +229,17 @@ for(state_nm in c(state.abb, "DC")){
     # use box-cox transform on hospital data to avoid negatives in predictions
     # we assume box-cox order 0 (so log() transform, but add 1 to avoid fitting
     # log(0) in our model)
-    mutate(count_pos = lag(replace_na(count_pos, 0),
-                           n = ccf_state %>%
-                             filter(type == 'Count Positive') %>%
-                             pull(lag) %>% abs()),
+    mutate(count_pos = replace_na(count_pos, 0),
            count_transformed = log(count_pos+1),
-           percent_pos = lag(replace_na(percent_pos, 0),
-                             n = ccf_state %>%
-                               filter(type == '% Positive') %>%
-                               pull(lag) %>% abs()),
+           percent_pos = replace_na(percent_pos, 0),
            percent_transformed = log(percent_pos+1),
-           percent_visits_covid = lag(replace_na(percent_visits_covid, 0),
-                                      n = ccf_state %>%
-                                        filter(type == 'ED Visit') %>%
-                                        pull(lag) %>% abs()),
+           percent_visits_covid = replace_na(percent_visits_covid, 0),
            ed_transformed = log(percent_visits_covid + 1),
-           weighted_raw_ww = lag(replace_na(weighted_raw_ww, 0),
-                                 n = ccf_state %>%
-                                   filter(type == 'Weighted WW Raw % Detect') %>%
-                                   pull(lag) %>% abs()),
+           weighted_raw_ww = replace_na(weighted_raw_ww, 0),
            raw_pct_transformed = log(weighted_raw_ww + 1),
-           weighted_postgrit_ww = lag(replace_na(weighted_postgrit_ww, 0),
-                                      n = ccf_state %>%
-                                        filter(type == 'Weighted WW Post-Grit Removal % Detect') %>%
-                                        pull(lag) %>% abs()),
+           weighted_postgrit_ww = replace_na(weighted_postgrit_ww, 0),
            postgrit_pct_transformed = log(weighted_postgrit_ww + 1),
-           weighted_sludge_ww = lag(replace_na(weighted_sludge_ww, 0),
-                                    n = ccf_state %>%
-                                      filter(type == 'Weighted WW Primary Sludge % Detect') %>%
-                                      pull(lag) %>% abs()),
+           weighted_sludge_ww = replace_na(weighted_sludge_ww, 0),
            sludge_pct_transformed = log(weighted_sludge_ww + 1),
            hosp_transformed = log(hosp+1)) %>%
     filter(           date >= '2022-10-01') %>%
