@@ -59,43 +59,52 @@ fit_arima_regressors <- function(cut_date, data, state, freq, xreg = NULL) {
       filter(date >= cut_date) %>%
       select(!date) %>%
       as.matrix()
-  }
 
-  zero_xregs <- sapply(training_xreg, function(x) sum(x, na.rm = TRUE) == 0)
-  if (any(zero_xregs)) {
-    train_data <- train_data %>%
-      bind_rows(data %>%
+    zero_xregs <- apply(training_xreg, 2, function(x) 
+      {length(unique(na.omit(x))) == 1})
+    #print("Invalid columns:")
+    #print(zero_xregs)
+    if (any(zero_xregs)) {
+      na_data <- data %>%
         filter(date >= cut_date) %>%
         mutate(
           state = state, cut_date = cut_date,
           freq = freq,
           fitted = NA,
           `Point Forecast` = NA
-        )) %>%
+        )
+      train_data <- train_data %>%
+        mutate(
+          state = state, cut_date = cut_date,
+          freq = freq) %>%
+        bind_rows(na_data) %>%
         select(state, cut_date, date, hosp, everything())
+      return(train_data)
+    }
   }
+
 
   tryCatch(
     {
       if (is.null(training_xreg)) {
         model <- auto.arima(ts_dat,
-          max.order = 30,
+          max.order = 10,
           # Max values come from arima fits of TS alone
-          max.p = 7, max.q = 8,
-          max.P = 3, max.Q = 3,
-          max.d = 2, max.D = 2,
+          max.p = 3, max.q = 3,
+          max.P = 1, max.Q = 1,
+          max.d = 1, max.D = 1,
           stepwise = FALSE, approximation = FALSE,
-          trace = FALSE, ic = "aic", seasonal.test = "ch"
+          trace = FALSE, ic = "bic", seasonal.test = "ch"
         )
       } else {
         model <- auto.arima(ts_dat,
-          max.order = 30,
+          max.order = 10,
           # Max values come from arima fits of TS alone
-          max.p = 7, max.q = 8,
-          max.P = 3, max.Q = 3,
-          max.d = 2, max.D = 2,
+          max.p = 3, max.q = 3,
+          max.P = 1, max.Q = 1,
+          max.d = 1, max.D = 1,
           stepwise = FALSE, approximation = FALSE,
-          trace = FALSE, ic = "aic", seasonal.test = "ch",
+          trace = FALSE, ic = "bic", seasonal.test = "ch",
           xreg = training_xreg
         )
       }
@@ -249,36 +258,79 @@ write_rds(df_list, paste0("results/Multivariate/arima_", freq, "final.rds"))
 # Plot
 for (predict_cut in prediction_horizons) {
   for (type in unique(df_list$model_type)) {
-    p <- df_list %>%
-      select(
-        state, cut_date, date, hosp, hosp_transformed,
-        fitted, `Point Forecast`, model_type
-      ) %>%
-      arrange(state) %>%
-      rename(`Fitted Period` = fitted, `Forecast Period` = `Point Forecast`) %>%
-      #      filter(is.na(`Forecast Period`) | `Forecast Period` <= max(hosp) * 100 ) %>%
-      pivot_longer(`Fitted Period`:`Forecast Period`) %>%
-      # mutate(value = exp(value) - 1,
-      #        hosp = exp(hosp) - 1) %>%
-      drop_na() %>%
+    
+    df_plot <- df_list %>%
       filter(
         cut_date == predict_cut,
-        date >= "2022-07-01",
+        date >= as.Date("2022-07-01"),
         model_type == type
       ) %>%
-      ggplot(aes(x = date)) +
-      geom_line(aes(y = hosp, color = "Reported \nHospitalizations")) +
-      geom_point(aes(y = value, color = name), size = 0.5) +
+      mutate(
+        date = as.Date(date),
+        cut_date = as.Date(cut_date),
+        
+        fitted_value = ifelse(date <= cut_date, fitted, NA_real_),
+        forecast_value = ifelse(date > cut_date, `Point Forecast`, NA_real_)
+      )
+    
+    p <- ggplot(df_plot, aes(x = date)) +
+      
+      # Reported truth
+      geom_line(
+        aes(y = hosp, color = "Reported"),
+        linewidth = 0.6,
+        na.rm = TRUE
+      ) +
+      
+      # Fitted line (before cut)
+      geom_point(
+        aes(y = fitted_value, color = "Fitted"),
+        size = 0.8,
+        na.rm = TRUE
+      ) +
+      
+      geom_point(
+        aes(y = forecast_value, color = "Forecast"),
+        size = 0.8,
+        na.rm = TRUE
+      ) +
+      
+      # Cut line
+      geom_vline(
+        xintercept = as.Date(predict_cut),
+        linetype = "dashed",
+        color = "gray40"
+      ) +
+      
+      facet_wrap(~state, ncol = 4, scales = "free_y") +
+      
       theme_minimal() +
-      scale_color_manual(values = c("#1B9E77", "#7570B3", "#000000")) +
-      labs(y = "Hospitalizations", x = "Date", color = "") +
-      facet_wrap(state ~ ., ncol = 4, scales = "free_y")
+      
+      scale_color_manual(values = c(
+        "Reported" = "#000000",
+        "Fitted" = "#1B9E77",
+        "Forecast" = "#7570B3"
+      )) +
+      
+      labs(
+        y = "Hospitalizations",
+        x = "Date",
+        color = ""
+      )
+    
     ggsave(
-      paste0(
-        "results/Multivariate/Multivariate Plots/ArimaX seasonal results for ", gsub("%", "PCT", type, fixed = T),
-        " freqency time series at ", predict_cut, " horizon", ".pdf"
+      filename = paste0(
+        "results/Multivariate/Multivariate Plots/ArimaX seasonal results for ",
+        gsub("%", "PCT", type, fixed = TRUE),
+        " frequency time series at ",
+        predict_cut,
+        " horizon.pdf"
       ),
-      plot = p, width = 16, height = 10, units = "in", bg = "white",
+      plot = p,
+      width = 16,
+      height = 10,
+      units = "in",
+      bg = "white",
       dpi = "retina"
     )
   }
