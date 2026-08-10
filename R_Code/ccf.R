@@ -93,15 +93,12 @@ get_ccf <- function(df, state_nm) {
   # --- Combine results cleanly ---
   result <- purrr::imap_dfr(ccf_list, tidy_ccf) %>%
     mutate(
-      acf = replace_na(acf, 0),
+      # acf = replace_na(acf, 0),
       abs_acf = abs(acf)
     ) %>%
-    filter(lag <= 0) %>%
-    arrange(desc(abs_acf)) %>%
-    slice_head(n = 1, by = type) %>%
+    filter(lag == 0) %>%
     mutate(
-      state = state_nm,
-      lag = if_else(acf == 0, 0, lag)
+      state = state_nm
     )
 
   # Save per-state CCF summary
@@ -111,14 +108,36 @@ get_ccf <- function(df, state_nm) {
 }
 
 # Iterate through states --------------------------------------------------
-state_ccf <- purrr::map_dfr(states$state, function(st) {
+state_ccf <- purrr::map_dfr(states, function(st) {
   if (st == "USA") return(NULL)
   get_ccf(joined_df, st)
 })
 
+make_heatmap <- function(df) {
+  ggplot(df, aes(x = state, y = type, fill = acf)) +
+    geom_tile() +
+    geom_text(
+      aes(label = if_else(acf == 0, "-", as.character(round(acf, 2)))),
+      size = 4.0,
+      color = "black"
+    ) +
+    scale_y_discrete(labels = function(x) str_wrap(x, width = 18)) +
+    scale_fill_distiller("Correlation", palette = "RdBu", limits = c(-1, 1)) +
+    theme_minimal() +
+    theme(
+      axis.title.y = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.x = element_text(size = 12, angle = 90, hjust = 1),
+      axis.text.y = element_text(size = 11),
+      legend.text = element_text(size = 12),
+      legend.title = element_text(size = 12)
+    )
+}
+
 # Save final results
 write_csv(state_ccf, "results/ccf.csv")
 
+ccf_df <- read.csv("results/ccf.csv", check.names = FALSE)
 
 # Plot Heatmap ------------------------------------------------------------
 ccf_df <- state_ccf %>%
@@ -126,26 +145,36 @@ ccf_df <- state_ccf %>%
 
 write_csv(ccf_df, "results/ccf_heatmap_input.csv")
 
-p <- ggplot(ccf_df, aes(x = state, y = type, fill = acf)) +
-  geom_tile() +
-  geom_text(
-    aes(label = if_else(acf == 0, "-", as.character(round(acf, 2)))),
-    size = 4.375,
-    angle = 90,
-    color = "black"
-  ) +
-  scale_y_discrete(labels = function(x) str_wrap(x, width = 18)) +
-  scale_fill_distiller("Correlation", palette = "RdBu", limits = c(-1, 1)) +
-  theme_minimal() +
-  theme(
-    axis.title.y = element_blank(),
-    axis.title.x = element_blank(),
-    axis.text.x = element_text(size = 13.75, angle = 90, hjust = 1),
-    axis.text.y = element_text(size = 12),
-    legend.text = element_text(size = 13.75),
-    legend.title = element_text(size = 13.75)
-  )
+ccf_avg <- ccf_df %>%
+  group_by(type) %>%
+  summarise(Covariate=first(type),
+    `Avg. Cross-Correlation` = mean(acf, na.rm = T), 
+      `No. of States with Data` = sum(!is.na(acf)),
+      .groups = "keep") %>%
+  ungroup() %>%
+  select(-type)
+
+options(xtable.floating = FALSE)
+options(xtable.timestamp = "ccf_avg")
+print(xtable(ccf_avg), include.rownames=FALSE,file = "results/ccf_avg.tex")
+
+states1 <- states[1:25]
+states2 <- states[26:length(states)]
+
+p1 <- make_heatmap(filter(ccf_df, state %in% states1)) +
+  ggtitle("A") +
+    theme(
+      plot.title = element_text(face = "bold")
+    )
+
+p2 <- make_heatmap(filter(ccf_df, state %in% states2)) +
+  ggtitle("B") +
+    theme(
+      plot.title = element_text(face = "bold")
+    )
+
+p <- p1 / p2
 
 ggsave("results/CCF_Heatmap.pdf",
-       plot = p, width = 16, height = 3,
+       plot = p, width = 14, height = 6,
        units = "in", bg = "white", dpi = "retina")

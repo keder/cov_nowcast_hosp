@@ -1,5 +1,5 @@
 # Load Packages -----------------------------------------------------------
-pacman::p_load(plotly, tidyverse, gridExtra, RColorBrewer, xtable)
+pacman::p_load(plotly, tidyverse, gridExtra, RColorBrewer, xtable, patchwork)
 
 
 # Functions ---------------------------------------------------------------
@@ -26,7 +26,7 @@ get_regressor_vals <- function(df, algorithm){
               rmse = sqrt(mean_square_error), 
               .groups = "keep")  %>%
     group_by(cut_date) %>%
-    filter(rmse <= quantile(rmse, 0.95)*100) %>%
+    filter(is.na(rmse) | rmse <= quantile(rmse, 0.95, na.rm = TRUE) * 100) %>%
     ungroup()  %>%
     mutate(algorithm_type = algorithm)
 }
@@ -58,24 +58,61 @@ heatmap_rmse_change <- function(df){
            pct_change_color = if_else(pct_change > 1, 1, pct_change))
 }
 
+make_heatmap <- function(df) {
+  ggplot(df, aes(x = state, y = cut_date, fill = pct_change_color)) +
+    geom_tile() +
+    geom_text(
+      aes(label = if_else(
+        is.na(pct_change),
+        "-",
+        if_else(pct_change > 10, "++", as.character(round(pct_change, 2)))
+      )),
+      size = 4.5
+    ) +
+    scale_y_continuous(trans = c("date", "reverse")) +
+    scale_fill_gradient2(
+      "Rel RMSE",
+      high = "darkorchid4",
+      mid = "white",
+      low = "darkgreen",
+      limits = c(-1, 1),
+      na.value = "lightgray"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.title = element_blank(),
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+      strip.text.y.left = element_text(size = 10),
+      strip.placement = "outside",
+      text = element_text(size = 16),
+      strip.text = element_text(size = 16),
+      legend.text = element_text(size = 16.75),
+      legend.title = element_text(size = 16.75)
+    ) +
+    facet_grid(type ~ ., labeller = label_wrap_gen(), switch = "y")
+}
+
 
 # Pull Model Results ------------------------------------------------------
 # ARIMA
-baseline_arima <- read_rds('results/Univariate/arima_simple_df_list.rds') %>%
+full_arima <- read_rds('results/Multivariate/arima_26final.rds')
+baseline_arima <- full_arima %>%
+  filter(model_type == "No exogenous regressors") %>%
   get_baseline_vals(., "ARIMA")
 
-models_arima <- read_rds("results/Multivariate/arimaX_26final.rds") %>%
+models_arima <- full_arima %>%
+  filter(model_type != "No exogenous regressors") %>%
   get_regressor_vals(., "ARIMA")
 
 # Prophet
-baseline_prophet <- read_rds('results/Univariate/prophet_simple_df_list.rds') %>%
+baseline_prophet <- read_rds('prophet_new_horizons_boxcox.rds') %>%
   get_baseline_vals(., "Prophet")
 
 models_prophet <- read_rds("results/Multivariate/prophet_final.rds") %>%
   get_regressor_vals(., "Prophet")
 
 # BSTS
-baseline_bsts <- read_rds('results/Univariate/bsts_simple_df_list.rds') %>%
+baseline_bsts <- read_rds('bsts_data.rds') %>%
   get_baseline_vals(., "BSTS")
 
 models_bsts <- read_rds("results/Multivariate/bsts_final.rds") %>%
@@ -97,47 +134,75 @@ print(xtable(ccf %>%
              label = "tab:ccf_avg"), include.rownames = F)
 
 arima_table <- get_rmse_change(baseline_arima) %>%
-  select(state, cut_date, rmse) %>%
-  group_by(state) %>%
-  mutate(first_val = rmse[cut_date == '2023-04-27'], 
-         val_pct_change = if_else(cut_date == '2023-04-27', rmse, (rmse-first_val)/first_val)) %>%
-  select(state, cut_date, val_pct_change) %>%
-  pivot_wider(names_from = "cut_date", values_from = "val_pct_change")
+  select(state, cut_date, pct_change) %>%
+  # group_by(state) %>%
+  # mutate(first_val = rmse[cut_date == '2023-04-27'], 
+  #        val_pct_change = if_else(cut_date == '2023-04-27', rmse, (rmse-first_val)/first_val)) %>%
+  # select(state, cut_date, val_pct_change) %>%
+  ungroup() %>%
+  select(-algorithm_type) %>%
+  pivot_wider(names_from = "cut_date", values_from = "pct_change")
 
 arima_table %>% ungroup() %>% 
   summarise(mean(`2024-01-27`))
 
 arima_table %>% filter(`2024-01-27` > 0)
 
-prophet_table <- get_rmse_change(baseline_prophet) %>%
-  select(state, cut_date, rmse) %>%
-  group_by(state) %>%
-  mutate(first_val = rmse[cut_date == '2023-04-27'], 
-         val_pct_change = if_else(cut_date == '2023-04-27', rmse, (rmse-first_val)/first_val)) %>%
-  select(state, cut_date, val_pct_change) %>%
-  pivot_wider(names_from = "cut_date", values_from = "val_pct_change")
+options(xtable.floating = FALSE)
+options(xtable.timestamp = "arima_table")
+print(xtable(arima_table), include.rownames=FALSE,file = "results/arima_table.tex")
 
-prophet_table %>% ungroup() %>% 
+options(xtable.floating = FALSE)
+options(xtable.timestamp = "arima_table_abs")
+print(xtable(baseline_arima %>% select(state, cut_date, rmse) %>% pivot_wider(names_from = "cut_date", values_from = "rmse")), include.rownames=FALSE,file = "results/arima_table_abs.tex")
+
+prophet_table <- get_rmse_change(baseline_prophet) %>%
+  select(state, cut_date, pct_change) %>%
+  # group_by(state) %>%
+  # mutate(first_val = rmse[cut_date == '2023-04-27'], 
+  #        val_pct_change = if_else(cut_date == '2023-04-27', rmse, (rmse-first_val)/first_val)) %>%
+  # select(state, cut_date, val_pct_change) %>%
+  ungroup() %>%
+  select(-algorithm_type) %>%
+  pivot_wider(names_from = "cut_date", values_from = "pct_change")
+
+prophet_table %>% 
   summarise(mean(`2024-01-27`))
 
 prophet_table %>% filter(`2024-01-27` > 0)
 
-bsts_table <- get_rmse_change(baseline_bsts) %>%
-  select(state, cut_date, rmse) %>%
-  group_by(state) %>%
-  mutate(first_val = rmse[cut_date == '2023-04-27'], 
-         val_pct_change = if_else(cut_date == '2023-04-27', rmse, (rmse-first_val)/first_val)) %>%
-  select(state, cut_date, val_pct_change) %>%
-  pivot_wider(names_from = "cut_date", values_from = "val_pct_change")
+options(xtable.floating = FALSE)
+options(xtable.timestamp = "prophet_table")
+print(xtable(prophet_table), include.rownames=FALSE,file = "results/prophet_table.tex")
 
-bsts_table %>% ungroup() %>% 
+options(xtable.floating = FALSE)
+options(xtable.timestamp = "prophet_table_abs")
+print(xtable(baseline_arima %>% select(state, cut_date, rmse) %>% pivot_wider(names_from = "cut_date", values_from = "rmse")), include.rownames=FALSE,file = "results/prophet_table_abs.tex")
+
+
+bsts_table <- get_rmse_change(baseline_bsts) %>%
+  select(state, cut_date, pct_change) %>%
+  # group_by(state) %>%
+  # mutate(first_val = rmse[cut_date == '2023-04-27'], 
+  #        val_pct_change = if_else(cut_date == '2023-04-27', rmse, (rmse-first_val)/first_val)) %>%
+  # select(state, cut_date, val_pct_change) %>%
+  ungroup() %>%
+  select(-algorithm_type) %>%
+  pivot_wider(names_from = "cut_date", values_from = "pct_change")
+
+bsts_table %>%
   summarise(mean(`2024-01-27`))
 
 bsts_table %>% filter(`2024-01-27` > 0)
 
 options(xtable.floating = FALSE)
 options(xtable.timestamp = "bsts_table")
-print(xtable(bsts_table), include.rownames=FALSE) 
+print(xtable(bsts_table), include.rownames=FALSE,file = "results/bsts_table.tex")
+
+options(xtable.floating = FALSE)
+options(xtable.timestamp = "bsts_table_abs")
+print(xtable(baseline_arima %>% select(state, cut_date, rmse) %>% pivot_wider(names_from = "cut_date", values_from = "rmse")), include.rownames=FALSE,file = "results/bsts_table_abs.tex")
+
 
 bind_rows(arima_table %>% mutate(model = "ARIMA"),
           prophet_table %>% mutate(model = "Prophet")) %>%
@@ -151,11 +216,13 @@ compare_table <- bind_rows(baseline_arima %>% mutate(model = "ARIMA"),
   group_by(state, cut_date) %>% 
   filter(rmse == min(rmse)) %>% 
   group_by(cut_date, model) %>% summarise(n = n())  %>% 
-  pivot_wider(names_from = cut_date, values_from = n)
+  pivot_wider(names_from = cut_date, values_from = n) %>%
+  mutate(across(everything(), ~ replace_na(.x, 0)))
+
 
 options(xtable.floating = FALSE)
 options(xtable.timestamp = "compare_table")
-print(xtable(compare_table), include.rownames=FALSE)
+print(xtable(compare_table), include.rownames=FALSE, file = "results/compare_table.tex")
 
 
 # Plots for Univariate Model Estimates ------------------------------------
@@ -182,7 +249,7 @@ p <- bind_rows(get_mean_rmse(baseline_arima),
              color = algorithm_type)) +
   geom_line(linewidth = 1.15) +
   theme_minimal() + 
-  labs(y = "Mean RMSE", x = "Prediction Window", color = "")  +
+  labs(y = "Mean RMSE", x = NULL, color = "")  +
   theme(text = element_text(size = 16), 
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
         strip.text = element_text(size = 13))
@@ -198,13 +265,18 @@ p <- bind_rows(baseline_arima, baseline_prophet) %>%
              color = algorithm_type)) +
   geom_line(linewidth = 1.15) +
   theme_minimal() + 
-  labs(y = "RMSE", x = "Prediction Window", 
+  labs(y = "RMSE", x = NULL, 
        color = "") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   facet_wrap(state ~ ., nrow =  6, scales = "free_y") +
-  theme(text = element_text(size = 14), 
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
-        strip.text = element_text(size = 13))
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 16),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 18),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 16),
+    strip.text = element_text(size = 18)
+  )
 
 ggsave("results/RMSE.pdf", 
        plot = p, width = 16, height = 10, units = "in", bg = "white", 
@@ -217,14 +289,25 @@ p <- bind_rows(get_rmse_change(baseline_arima),
              color = algorithm_type)) +
   geom_line(linewidth = 1.15) +
   theme_minimal() + 
-  labs(y = "RMSE Change from Farthest Prediction Window", x = "Prediction Window", 
-       color = "") +
-  ylim(c(-1,1)) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  facet_wrap(state ~ ., nrow =  6)  +
-  theme(text = element_text(size = 14), 
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
-        strip.text = element_text(size = 13))
+  labs(
+    y = "RMSE Change from Farthest Prediction Window", 
+    x = NULL, 
+    color = ""
+  ) +
+  scale_y_continuous(
+    labels = scales::label_number(accuracy = 0.01)
+  ) +
+  facet_wrap(state ~ ., nrow = 6, scales = "free_y") +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 18),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 16),
+    strip.text = element_text(size = 18)
+  )
+
+write_csv(get_rmse_change(baseline_arima), "results/rel_change.csv")
 
 ggsave("results/RMSE Rel Change from Baseline.pdf", 
        plot = p, width = 16, height = 10, units = "in", bg = "white", 
@@ -244,32 +327,39 @@ heatmap_df <- bind_rows(heatmap_rmse_change(bind_rows(baseline_arima, models_ari
                                               'Wastewater % Detection (Raw, Post-Grit, Sludge)')))
 
 # Create algorithm-specific heat map
-for(algorithm in unique(heatmap_df$algorithm_type)){
-  p <- ggplot(aes(x = state, y = cut_date, fill = pct_change_color), 
-              data = heatmap_df %>% filter(algorithm_type == algorithm) %>%
-                mutate(cut_date = as.Date(cut_date)) %>%
-                arrange(desc(cut_date))) + 
-    geom_tile() + 
-    geom_text(aes(label = if_else(pct_change > 10, '++', as.character(round(pct_change, 2)))), size=2.25) + 
-    scale_y_continuous(    trans = c("date", "reverse")) +
-    scale_fill_gradient2("Rel RMSE", high = "darkorchid4",
-                         mid = "white",
-                         low = "darkgreen", limits = c(-1, 1), 
-                         na.value = "gray10") +
-    theme_minimal() +
-    theme(axis.title.y = element_blank(), 
-          axis.title.x = element_blank(), 
-          axis.text.x = element_text(angle = 90),
-          strip.placement = "outside") +
-    guides(fill="none") +
-    facet_grid(type ~ ., labeller = label_wrap_gen(), switch = "y") + 
-    
-    theme(text = element_text(size = 14), 
-          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
-          strip.text = element_text(size = 12))
-  ggsave(paste0("results/Predcitors RMSE Change from Baseline at ", algorithm, ".pdf"),
-         plot = p, width = 16, height = 10, units = "in", bg = "white", 
-         dpi = "retina") 
+
+states <- sort(unique(heatmap_df$state))
+states1 <- states[1:25]
+states2 <- states[26:length(states)]
+
+for (algorithm in unique(heatmap_df$algorithm_type)) {
+  
+  df <- heatmap_df %>%
+    filter(algorithm_type == algorithm) %>%
+    mutate(cut_date = as.Date(cut_date)) %>%
+    arrange(desc(cut_date))
+  
+  p1 <- make_heatmap(filter(df, state %in% states1)) +
+    ggtitle("A") +
+    theme(
+      plot.title = element_text(face = "bold")
+    )
+  
+  p2 <- make_heatmap(filter(df, state %in% states2)) +
+    ggtitle("B") +
+    theme(
+      plot.title = element_text(face = "bold")
+    )
+  
+  p <- p1 / p2
+  
+  ggsave(
+    paste0("results/Predictors RMSE Change from Baseline at ", algorithm, ".pdf"),
+    p,
+    width = 16,
+    height = 18,
+    bg = "white"
+  )
 }
 
 # Other plots for multivariate models
@@ -305,12 +395,20 @@ p <- p_df %>%
   geom_line(linewidth = 1.15) + 
   scale_color_manual(values = c('#9e0142', '#2d004b', '#4393c3', 
                                 '#2166ac', '#66bd63', '#006837')) +
-  labs(color = "Model",  x = "Prediction Window", y = "Median RMSE") +
+  labs(color = "Model",  x = NULL, y = "Median RMSE") +
   theme_minimal() + 
   theme(text = element_text(size = 11.5), 
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
         strip.text = element_text(size = 13)) +
-  facet_wrap(.~algorithm)
+  facet_wrap(.~algorithm) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 16),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 18),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 16),
+    strip.text = element_text(size = 18)
+  )
 
 ggsave("results/Median_Multivariate RMSE.pdf", 
        plot = p, width = 16, height = 10, units = "in", bg = "white", 

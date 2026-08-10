@@ -255,6 +255,7 @@ for (state_nm in c(state.abb, "DC")) {
 dir.create("results/Multivariate", recursive = TRUE, showWarnings = FALSE)
 write_rds(df_list, paste0("results/Multivariate/arima_", freq, "final.rds"))
 
+
 # Plot
 for (predict_cut in prediction_horizons) {
   for (type in unique(df_list$model_type)) {

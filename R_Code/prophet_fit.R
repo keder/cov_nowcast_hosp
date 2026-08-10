@@ -33,6 +33,7 @@ fit_prophet <- function(cut_date, data, state) {
     mutate(state = state, cut_date = cut_date,
            hosp = exp(hosp_transformed - 1)) %>%
     dplyr::select(state, cut_date, date, hosp, everything())
+  print(train_data)
   return(train_data)
 }
 
@@ -46,7 +47,8 @@ fit_prophet_reg_start <- function(cut_date, data, state){
   model <- prophet(growth = "linear",
                    changepoint.prior.scale = 0.01,
                    yearly.seasonality = "auto",
-                   mcmc.samples = 2000)
+                   mcmc.samples = 2000,
+                   verbose = FALSE)
   return(list("train_data" = train_data, "model" = model))
 }
 fit_prophet_reg_end <- function(model, future, train_data, cut_date, state, data){
@@ -146,21 +148,12 @@ fit_prophet_regressors <- function(cut_date, data, state) {
   return(fit_prophet_reg_end(model, future, train_data, cut_date, state, data))
 }
 
+full_data <- read_csv('data/joined_df.csv')
 # Pull in Hospitalization Data --------------------------------------------
-hospitalizations_age <<- read.csv("https://data.cdc.gov/resource/aemt-mg7g.csv?$limit=500000") %>%
-  dplyr::select(date = week_end_date, state = jurisdiction, weekly_actual_days_reporting_any_data, weekly_percent_days_reporting_any_data,
-         total_admissions_all_covid_confirmed, total_admissions_adult_covid_confirmed, total_admissions_pediatric_covid_confirmed,
-         avg_admissions_all_covid_confirmed, percent_adult_covid_admissions,
-         num_hospitals_admissions_all_covid_confirmed) %>%
-  mutate(date = as.Date(date),
-         mmwr = MMWRweek::MMWRweek(date),
-         mmwr_date = paste0(mmwr$MMWRyear, '-', if_else(nchar(mmwr$MMWRweek) == 1,
-                                                        paste0("0", mmwr$MMWRweek),
-                                                        as.character(mmwr$MMWRweek)))) %>%
-  filter(date <= "2024-05-01") # Filter out optional reporting period
+hospitalizations_age <<- full_data
 
 # Set Prediction Horizons -------------------------------------------------
-max_date <- max(hospitalizations_age$date)
+max_date <- max(full_data$date)
 prediction_horizons <- c(max_date %m-% months(3), max_date %m-% months(6),
                          max_date %m-% months(9), max_date %m-% months(12)) %>%
   as.character()
@@ -179,7 +172,7 @@ for(state_nm in c(state.abb, "DC")){
     mutate(hosp_transformed = log(hosp+1))
   for(predict_cut in prediction_horizons){
     rmse_spec = fit_prophet(predict_cut, data, state_nm)
-    df_list <- bind_rows(df_list, data)
+    df_list <- bind_rows(df_list, rmse_spec)
   }
 }
 
@@ -213,7 +206,6 @@ for(predict_cut in prediction_horizons){
 # Multivariate Prophet Model ----------------------------------------------
 df_list <- tibble()
 
-full_data <- read_csv('data/joined_df.csv')
 # Run model for each state
 for(state_nm in c(state.abb, "DC")){
   print(state_nm)
