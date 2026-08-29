@@ -224,6 +224,12 @@ options(xtable.floating = FALSE)
 options(xtable.timestamp = "compare_table")
 print(xtable(compare_table), include.rownames=FALSE, file = "results/compare_table.tex")
 
+print(xtable(bind_rows(get_median_rmse(baseline_arima), 
+               get_median_rmse(baseline_prophet)) %>%
+  bind_rows(get_median_rmse(baseline_bsts)) %>%
+  rename(Model=algorithm_type) %>%
+  pivot_wider(names_from = "cut_date", values_from = "median_rmse")), include.rownames=FALSE, file = "results/median_rmse.tex")
+
 
 # Plots for Univariate Model Estimates ------------------------------------
 p <- bind_rows(get_median_rmse(baseline_arima), 
@@ -413,3 +419,14 @@ p <- p_df %>%
 ggsave("results/Median_Multivariate RMSE.pdf", 
        plot = p, width = 16, height = 10, units = "in", bg = "white", 
        dpi = "retina")
+
+print(xtable(p_df %>% 
+  bind_rows(bind_rows(get_median_rmse(baseline_arima), 
+          get_median_rmse(baseline_prophet)) %>%
+  bind_rows(get_median_rmse(baseline_bsts)) %>%
+  mutate(algorithm = algorithm_type, 
+         algorithm_type = "Baseline")) %>% 
+  rename(Model=algorithm, Regressors=algorithm_type) %>%
+  relocate(Model, .before = Regressors) %>%
+  arrange(Model) %>%
+  pivot_wider(names_from = "cut_date", values_from = "median_rmse")), include.rownames=FALSE, file = "results/median_rmse.tex")
