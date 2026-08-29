@@ -1,4 +1,4 @@
-# The Use of Auxiliary Data Sources in Forecasting Viral Respiratory Illness Hospitalizations: An Illustrative Example using COVID-19 Publicly Available Data
+# Understanding the Role of Auxiliary Surveillance Indicators for Reconstructing and Forecasting Weekly COVID-19 Hospitalizations
 
 Data cleaning, timeseries modeling, and data visualization code in R supporting the manuscript.
 
